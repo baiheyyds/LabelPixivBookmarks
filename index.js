@@ -2,7 +2,7 @@
 // @name         Pixiv收藏夹自动标签
 // @name:en      Label Pixiv Bookmarks
 // @namespace    http://tampermonkey.net/
-// @version      5.16
+// @version      5.17
 // @description  自动为Pixiv收藏夹内图片打上已有的标签，并可以搜索收藏夹
 // @description:en    Automatically add existing labels for images in the bookmarks, and users are able to search the bookmarks
 // @author       philimao
@@ -20,7 +20,7 @@
 
 // ==/UserScript==
 
-const version = "5.16";
+const version = "5.17";
 const latest = `♢ 新增显示失效作品的PID
 ♢ Added Functions to show PID for invalid works
 ♢ 新增高级选项，是否添加所有作品标签至用户标签
@@ -331,7 +331,7 @@ async function fetchAllBookmarksByTag(
     }
   } catch (err) {
     window.alert(
-      `获取收藏夹时发生错误，请截图到GitHub反馈\nAn error was caught during fetching bookmarks. You might report it on GitHub${err.name}: ${err.message}\n${err.stack}`
+      `获取收藏夹时发生错误，请截图到GitHub反馈\nAn error was caught during fetching bookmarks. You might report it on GitHub\n${err.name}: ${err.message}\n${err.stack}`
     );
     console.log(err);
   } finally {
@@ -2941,11 +2941,25 @@ async function fetchUserTags() {
     );
   userTagDict = tagsObj.body;
   const userTagsSet = new Set();
+  const addTag2Set = (tag) => {
+    try {
+      userTagsSet.add(decodeURI(tag));
+    } catch (err) {
+      userTagsSet.add(tag);
+      if (err.message !== "URI malformed") {
+        console.log("[Label Pixiv] Error!");
+        console.log(err.name, err.message);
+        console.log(err.stack);
+        window.alert(`加载标签%{tag}时出现错误，请按F12打开控制台截图错误信息并反馈至GitHub。
+Error loading tag ${tag}. Please press F12 and take a screenshot of the error message in the console and report it to GitHub.`);
+      }
+    }
+  };
   for (let obj of userTagDict.public) {
-    userTagsSet.add(decodeURI(obj.tag));
+    addTag2Set(obj.tag);
   }
   for (let obj of userTagDict["private"]) {
-    userTagsSet.add(decodeURI(obj.tag));
+    addTag2Set(obj.tag);
   }
   userTagsSet.delete("未分類");
   return sortByParody(Array.from(userTagsSet));
