@@ -2,7 +2,7 @@
 // @name         Pixiv收藏夹自动标签
 // @name:en      Label Pixiv Bookmarks
 // @namespace    http://tampermonkey.net/
-// @version      5.17
+// @version      5.18
 // @description  自动为Pixiv收藏夹内图片打上已有的标签，并可以搜索收藏夹
 // @description:en    Automatically add existing labels for images in the bookmarks, and users are able to search the bookmarks
 // @author       philimao
@@ -20,15 +20,11 @@
 
 // ==/UserScript==
 
-const version = "5.17";
-const latest = `♢ 新增显示失效作品的PID
-♢ Added Functions to show PID for invalid works
-♢ 新增高级选项，是否添加所有作品标签至用户标签
-♢ Added advanced options to add all work tags to user tags
-♢ 新增批量为失效作品添加INVALID标签功能（在其他功能中）
-♢ Added Functions to label deleted/private works as INVALID (Function Page)
-♢ 新增加速模式选项，通过移除请求间的等待时间加速脚本运行（在其他功能中）
-♢ Added Turbo Mode that removes most delay time between requests to increase the speed of the script (Function Page)`;
+const version = "5.18";
+const latest = `♢ 处理Pixiv组件类名更新
+♢ Update constants due to change of element class names
+♢ 并非所有功能都已恢复，仅验证了设置标签功能
+♢ Note that not all functions have been restored. Only labeling function has been validated.`;
 
 let uid,
   token,
@@ -54,11 +50,14 @@ let unsafeWindow_ = unsafeWindow,
   GM_registerMenuCommand_ = GM_registerMenuCommand;
 
 // selectors
-const BANNER = ".sc-x1dm5r-0";
-const THEME_CONTAINER = ".charcoal-token";
-const PAGE_BODY = ".jMEnyM"; // 自主页、收藏起下方
-const EDIT_BUTTON_CONTAINER = ".fElfQf"; // 管理收藏按钮
-const WORK_NUM = ".sc-1mr081w-0";
+const BANNER = ".sc-8bf48ebe-0";
+const THEME_CONTAINER = "html";
+const WORK_SECTION = "section.sc-3d8ed48f-0"; // 作品section，从works->pagination
+const WORK_CONTAINER = "ul.sc-7d21cb21-1.jELUak"; // 仅包含作品
+const PAGE_BODY = ".sc-2b45994f-0.cUskQy"; // 自主页、收藏起下方
+const EDIT_BUTTON_CONTAINER = ".sc-9d335d39-6.cfUrtF"; // 管理收藏按钮父容器，包含左侧作品文字
+const REMOVE_BOOKMARK_CONTAINER = ".sc-231887f1-4.kvBpUA";
+const WORK_NUM = ".sc-b5e6ab10-0.hfQbJx";
 const ADD_TAGS_MODAL_ENTRY = ".bbTNLI"; // 原生添加标签窗口中标签按钮
 const ALL_TAGS_BUTTON = ".jkGZFM"; // 标签切换窗口触发按钮
 const ALL_TAGS_CONTAINER = ".hpRxDJ"; // 标签按钮容器
@@ -90,7 +89,7 @@ function arrayIncludes(array, element, func1, func2, fuzzy) {
   if (el) {
     console.log(el, array, element);
     throw new TypeError(
-      `Element ${el.toString()} does not have method toUpperCase`
+      `Element ${el.toString()} does not have method toUpperCase`,
     );
   }
   array1 = array1.map((i) => i.toUpperCase());
@@ -106,7 +105,7 @@ function isEqualObject(obj1, obj2) {
     typeof obj1 === typeof obj2 &&
     Object.keys(obj1).every((key, i) => key === Object.keys(obj2)[i]) &&
     Object.values(obj1).every((value, i) =>
-      isEqualObject(value, Object.values(obj2)[i])
+      isEqualObject(value, Object.values(obj2)[i]),
     )
   );
 }
@@ -117,7 +116,7 @@ function delay(ms) {
 
 function chunkArray(arr, chunkSize) {
   return Array.from({ length: Math.ceil(arr.length / chunkSize) }, (_, index) =>
-    arr.slice(index * chunkSize, index * chunkSize + chunkSize)
+    arr.slice(index * chunkSize, index * chunkSize + chunkSize),
   );
 }
 
@@ -138,7 +137,7 @@ function setValue(name, value) {
     if (valueArray.length) {
       if (
         !valueArray.find(
-          (el) => JSON.stringify(el.value) === JSON.stringify(value)
+          (el) => JSON.stringify(el.value) === JSON.stringify(value),
         )
       ) {
         const lastElem = valueArray[valueArray.length - 1];
@@ -148,7 +147,7 @@ function setValue(name, value) {
             if (lastElem.value[key]) {
               // previous key
               lastElem.value[key] = Array.from(
-                new Set(lastElem["value"][key].concat(value[key]))
+                new Set(lastElem["value"][key].concat(value[key])),
               );
             } else {
               // new key
@@ -201,11 +200,11 @@ function restoreSynonymDict() {
   a.href = URL.createObjectURL(
     new Blob([JSON.stringify([newDict].concat(dictArray))], {
       type: "application/json",
-    })
+    }),
   );
   a.setAttribute(
     "download",
-    `synonym_dict_restored_${new Date().toLocaleDateString()}.json`
+    `synonym_dict_restored_${new Date().toLocaleDateString()}.json`,
   );
   a.click();
 }
@@ -248,7 +247,7 @@ function loadResources() {
   const style = document.createElement("style");
   style.id = "LB_overwrite";
   style.innerHTML =
-    "*,::after,::before { box-sizing: content-box; } .btn,.form-control,.form-select,.row>* { box-sizing: border-box; } body { background: initial; }";
+    "*,::after,::before { box-sizing: content-box; } .btn,.form-control,.form-select,.row>* { box-sizing: border-box; } body { background: initial; } a {color: inherit; text-decoration: none} .collapse.show {visibility: visible}";
   document.head.appendChild(style);
   if (DEBUG) console.log("[Label Bookmarks] Stylesheet Loaded");
 }
@@ -258,14 +257,14 @@ async function fetchBookmarks(uid, tagToQuery, offset, publicationType) {
   const bookmarksRaw = await fetch(
     `/ajax/user/${uid}` +
       `/illusts/bookmarks?tag=${tagToQuery}` +
-      `&offset=${offset}&limit=${bookmarkBatchSize}&rest=${publicationType}`
+      `&offset=${offset}&limit=${bookmarkBatchSize}&rest=${publicationType}`,
   );
   if (!turboMode) await delay(500);
   const bookmarksRes = await bookmarksRaw.json();
   if (!bookmarksRaw.ok || bookmarksRes.error === true) {
     return alert(
       `获取用户收藏夹列表失败\nFail to fetch user bookmarks\n` +
-        decodeURI(bookmarksRes.message)
+        decodeURI(bookmarksRes.message),
     );
   } else return bookmarksRes.body;
 }
@@ -274,7 +273,7 @@ async function fetchAllBookmarksByTag(
   tag,
   publicationType,
   progressBar,
-  max = 100
+  max = 100,
 ) {
   let total = 65535,
     offset = 0,
@@ -287,7 +286,7 @@ async function fetchAllBookmarksByTag(
         const batchSize = 10;
         for (let i = 0; i < batchSize && offset < total; i++) {
           bookmarksBatch.push(
-            fetchBookmarks(uid, tag, offset, publicationType)
+            fetchBookmarks(uid, tag, offset, publicationType),
           );
           offset += max;
         }
@@ -311,14 +310,14 @@ async function fetchAllBookmarksByTag(
           uid,
           tag,
           offset,
-          publicationType
+          publicationType,
         );
         total = bookmarks.total;
         const works = bookmarks["works"];
         works.forEach(
           (w) =>
             (w.associatedTags =
-              bookmarks["bookmarkTags"][w["bookmarkData"]["id"]] || [])
+              bookmarks["bookmarkTags"][w["bookmarkData"]["id"]] || []),
         );
         totalWorks.push(...works);
         offset = totalWorks.length;
@@ -331,7 +330,7 @@ async function fetchAllBookmarksByTag(
     }
   } catch (err) {
     window.alert(
-      `获取收藏夹时发生错误，请截图到GitHub反馈\nAn error was caught during fetching bookmarks. You might report it on GitHub\n${err.name}: ${err.message}\n${err.stack}`
+      `获取收藏夹时发生错误，请截图到GitHub反馈\nAn error was caught during fetching bookmarks. You might report it on GitHub\n${err.name}: ${err.message}\n${err.stack}`,
     );
     console.log(err);
   } finally {
@@ -379,7 +378,7 @@ async function removeBookmark(bookmarkIds, progressBar) {
   for (let i of [...Array(num).keys()]) {
     if (!window.runFlag) break;
     const ids = bookmarkIds.filter(
-      (_, j) => j >= i * bookmarkBatchSize && j < (i + 1) * bookmarkBatchSize
+      (_, j) => j >= i * bookmarkBatchSize && j < (i + 1) * bookmarkBatchSize,
     );
     await run(ids);
     if (progressBar) {
@@ -399,7 +398,7 @@ async function updateBookmarkTags(
   bookmarkIds,
   addTags,
   removeTags,
-  progressBar
+  progressBar,
 ) {
   if (!bookmarkIds?.length)
     throw new TypeError("BookmarkIds is undefined or empty array");
@@ -427,7 +426,7 @@ async function updateBookmarkTags(
             fetchRequest("/ajax/illusts/bookmarks/add_tags", {
               tags: tagsChunk,
               bookmarkIds: ids,
-            })
+            }),
           );
         }
       }
@@ -438,7 +437,7 @@ async function updateBookmarkTags(
             fetchRequest("/ajax/illusts/bookmarks/remove_tags", {
               removeTags: tagsChunk,
               bookmarkIds: ids,
-            })
+            }),
           );
         }
       }
@@ -483,7 +482,7 @@ async function updateBookmarkTags(
 async function updateBookmarkRestrict(
   bookmarkIds,
   bookmarkRestrict,
-  progressBar
+  progressBar,
 ) {
   if (!bookmarkIds?.length)
     throw new TypeError("BookmarkIds is undefined or empty array");
@@ -505,7 +504,7 @@ async function updateBookmarkRestrict(
   for (let i of [...Array(num).keys()]) {
     if (!window.runFlag) break;
     const ids = bookmarkIds.filter(
-      (_, j) => j >= i * bookmarkBatchSize && j < (i + 1) * bookmarkBatchSize
+      (_, j) => j >= i * bookmarkBatchSize && j < (i + 1) * bookmarkBatchSize,
     );
     await run(ids);
     if (progressBar) {
@@ -524,12 +523,12 @@ async function updateBookmarkRestrict(
 async function clearBookmarkTags(works) {
   if (!works?.length) {
     return alert(
-      `没有获取到收藏夹内容，操作中断，请检查选项下是否有作品\nFetching bookmark information failed. Abort operation. Please check the existence of works with the configuration`
+      `没有获取到收藏夹内容，操作中断，请检查选项下是否有作品\nFetching bookmark information failed. Abort operation. Please check the existence of works with the configuration`,
     );
   }
   if (
     !window.confirm(
-      `确定要删除所选作品的标签吗？（作品的收藏状态不会改变）\nThe tags of work(s) you've selected will be removed (become uncategorized). Is this okay?`
+      `确定要删除所选作品的标签吗？（作品的收藏状态不会改变）\nThe tags of work(s) you've selected will be removed (become uncategorized). Is this okay?`,
     )
   )
     return;
@@ -546,7 +545,7 @@ async function clearBookmarkTags(works) {
   const progressBar = document.querySelector("#progress_modal_progress_bar");
 
   const tagPool = Array.from(
-    new Set(works.reduce((a, b) => [...a, ...b.associatedTags], []))
+    new Set(works.reduce((a, b) => [...a, ...b.associatedTags], [])),
   );
   const workLength = works.length;
   const tagPoolSize = tagPool.length;
@@ -584,7 +583,7 @@ async function clearBookmarkTags(works) {
       await updateBookmarkTags(
         [work.bookmarkId || work["bookmarkData"]["id"]],
         undefined,
-        work.associatedTags
+        work.associatedTags,
       );
     }
   }
@@ -609,7 +608,7 @@ async function handleClearBookmarkTags(evt) {
   const works = selected
     .map((el) => {
       const middleChild = Object.values(
-        el.parentNode.parentNode.parentNode.parentNode
+        el.parentNode.parentNode.parentNode.parentNode,
       )[0]["child"];
       const work = middleChild["memoizedProps"]["work"];
       work.associatedTags =
@@ -624,12 +623,12 @@ async function handleClearBookmarkTags(evt) {
 async function deleteTag(tag, publicationType) {
   if (!tag)
     return alert(
-      `请选择需要删除的标签\nPlease select the tag you would like to delete`
+      `请选择需要删除的标签\nPlease select the tag you would like to delete`,
     );
   if (
     tag === "未分類" ||
     !window.confirm(
-      `确定要删除所选的标签 ${tag} 吗？（作品的收藏状态不会改变）\nThe tag ${tag} will be removed and works of ${tag} will keep bookmarked. Is this okay?`
+      `确定要删除所选的标签 ${tag} 吗？（作品的收藏状态不会改变）\nThe tag ${tag} will be removed and works of ${tag} will keep bookmarked. Is this okay?`,
     )
   )
     return;
@@ -648,7 +647,7 @@ async function deleteTag(tag, publicationType) {
     tag,
     publicationType,
     progressBar,
-    90
+    90,
   );
   console.log(totalBookmarks);
 
@@ -711,7 +710,7 @@ async function handleLabel(evt) {
       labelR18 === "true"
     }; labelSafe: ${labelSafe}; labelAI: ${labelAI}; labelAuthor: ${
       labelAuthor === "true"
-    }; publicationType: ${publicationType}; exclusion: ${exclusion.join(",")}`
+    }; publicationType: ${publicationType}; exclusion: ${exclusion.join(",")}`,
   );
 
   if (
@@ -752,7 +751,7 @@ All tags that come with the work will be first added to your user tags, which ca
       uid,
       tagToQuery,
       realOffset,
-      publicationType
+      publicationType,
     );
     if (DEBUG) console.log("Bookmarks", bookmarks);
     if (!total) total = bookmarks.total;
@@ -772,8 +771,8 @@ All tags that come with the work will be first added to your user tags, which ca
         intersection = workTags.map(
           (workTag) =>
             Object.keys(synonymDict).find((userTag) =>
-              synonymDict[userTag].includes(workTag)
-            ) || workTag
+              synonymDict[userTag].includes(workTag),
+            ) || workTag,
         );
       if (labelAuthor === "true")
         workTags.push(work["userName"], work["userId"]);
@@ -797,10 +796,10 @@ All tags that come with the work will be first added to your user tags, which ca
                 arrayIncludes(workTags, alias, getWorkTitle) || // work title
                 (arrayIncludes(workTags, alias, null, getCharacterName) &&
                   (!labelStrict ||
-                    arrayIncludes(workTags, alias, null, getWorkTitle)))
+                    arrayIncludes(workTags, alias, null, getWorkTitle))),
             )
           );
-        })
+        }),
       );
       // if workTags match some alias, add it to the intersection (exact match, with or without work title)
       intersection = intersection.concat(
@@ -816,25 +815,25 @@ All tags that come with the work will be first added to your user tags, which ca
                   synonymDict[aliasName].concat(aliasName),
                   workTag,
                   null,
-                  getWorkTitle
+                  getWorkTitle,
                 ) ||
                 arrayIncludes(
                   synonymDict[aliasName].concat(aliasName),
                   workTag,
                   null,
-                  getCharacterName
-                )
+                  getCharacterName,
+                ),
             )
           )
             return true;
-        })
+        }),
       );
       if (work["xRestrict"] && labelR18 === "true") intersection.push("R-18");
       if (!work["xRestrict"] && labelSafe === "true") intersection.push("SFW");
       if (work["aiType"] === 2 && labelAI === "true") intersection.push("AI");
       // remove duplicate and exclusion
       intersection = Array.from(new Set(intersection)).filter(
-        (t) => !exclusion.includes(t)
+        (t) => !exclusion.includes(t),
       );
 
       const bookmarkId = work["bookmarkData"]["id"];
@@ -847,7 +846,7 @@ All tags that come with the work will be first added to your user tags, which ca
               (tag) =>
                 !exclusion.includes(tag) &&
                 tag.length <= 20 &&
-                !tag.includes("入り")
+                !tag.includes("入り"),
             )
             .slice(0, 1); // Can be changed if you want to add more than 1 tag from the same work
           if (first) {
@@ -914,7 +913,7 @@ async function handleSearch(evt) {
     const advanced = document.querySelector("#advanced_search_fields");
     const configContainers = [...advanced.querySelectorAll(".row")];
     searchConfigs = configContainers.map((el) =>
-      [...el.querySelectorAll("input")].map((i) => i.checked)
+      [...el.querySelectorAll("input")].map((i) => i.checked),
     );
   }
 
@@ -967,12 +966,12 @@ async function handleSearch(evt) {
   // noinspection TypeScriptUMDGlobal
   const bootstrap_ = bootstrap;
   const collapseIns = bootstrap_.Collapse.getInstance(
-    document.querySelector("#advanced_search")
+    document.querySelector("#advanced_search"),
   );
   if (collapseIns) collapseIns.hide();
 
   let includeArray = searchStringArray.filter(
-    (el) => el.length && !el.includes("!")
+    (el) => el.length && !el.includes("!"),
   );
   let excludeArray = searchStringArray
     .filter((el) => el.length && el.includes("!"))
@@ -980,7 +979,7 @@ async function handleSearch(evt) {
 
   console.log("Search Configuration:", searchConfigs);
   console.log(
-    `matchPattern: ${matchPattern}; tagsLengthMatch: ${tagsLengthMatch}; tagToQuery: ${tagToQuery}; publicationType: ${publicationType}`
+    `matchPattern: ${matchPattern}; tagsLengthMatch: ${tagsLengthMatch}; tagToQuery: ${tagToQuery}; publicationType: ${publicationType}`,
   );
   console.log("includeArray:", includeArray, "excludeArray", excludeArray);
 
@@ -993,7 +992,7 @@ async function handleSearch(evt) {
       uid,
       tagToQuery,
       searchOffset,
-      publicationType
+      publicationType,
     );
     searchPrompt.innerText = `
     当前搜索进度 / Searched：${searchOffset} / ${totalBookmarks}
@@ -1038,7 +1037,13 @@ async function handleSearch(evt) {
               arrayIncludes(synonymDict[el[1]], keyword) || // input match any alias
               (matchPattern === "fuzzy" &&
                 (stringIncludes(el[1], keyword) ||
-                  arrayIncludes(synonymDict[el[1]], keyword, null, null, true)))
+                  arrayIncludes(
+                    synonymDict[el[1]],
+                    keyword,
+                    null,
+                    null,
+                    true,
+                  ))),
           );
         const keywordArray = [keyword];
         if (el) {
@@ -1051,7 +1056,7 @@ async function handleSearch(evt) {
               (config[0] && stringIncludes(work.title, kw)) ||
               (config[1] && stringIncludes(work["userName"], kw)) ||
               (config[2] && arrayIncludes(workTags, kw)) ||
-              (config[3] && arrayIncludes(bookmarkTags, kw))
+              (config[3] && arrayIncludes(bookmarkTags, kw)),
           )
         )
           return true;
@@ -1059,7 +1064,7 @@ async function handleSearch(evt) {
         return keywordArray.some(
           (kw) =>
             (config[2] && arrayIncludes(workTags, kw, null, null, true)) ||
-            (config[3] && arrayIncludes(bookmarkTags, kw, null, null, true))
+            (config[3] && arrayIncludes(bookmarkTags, kw, null, null, true)),
         );
       };
 
@@ -1147,7 +1152,7 @@ function displayWork(work, resultsDiv, textColor) {
   if (work["pageCount"] > 1)
     container.querySelector(".page-icon").classList.remove("d-none");
   container.firstElementChild.addEventListener("click", (evt) =>
-    galleryMode(evt, work)
+    galleryMode(evt, work),
   );
   resultsDiv.appendChild(container);
 }
@@ -1316,19 +1321,19 @@ async function handleGenerate(evt) {
   const tag = document.querySelector("#generator_select_tag").value;
   const batchSize = Math.max(
     0,
-    parseInt(document.querySelector("#generator_form_num").value) || 100
+    parseInt(document.querySelector("#generator_form_num").value) || 100,
   );
   const publicationType = document.querySelector(
-    "#generator_form_publication"
+    "#generator_form_publication",
   ).value;
   const restriction = document.querySelector(
-    "#generator_form_restriction"
+    "#generator_form_restriction",
   ).value;
   console.log(tag, batchSize, publicationType, restriction);
   if (
     !tag &&
     !confirm(
-      `加载全部收藏夹需要较长时间，是否确认操作？\nLoad the whole bookmark will take quite long time to process. Is this okay?`
+      `加载全部收藏夹需要较长时间，是否确认操作？\nLoad the whole bookmark will take quite long time to process. Is this okay?`,
     )
   )
     return;
@@ -1413,9 +1418,8 @@ async function handleGenerate(evt) {
   if (generatedResults.length > generatorDisplayLimit) {
     document.querySelector("#generator_more").classList.remove("d-none");
   }
-  document.querySelector(
-    "#generator_prompt"
-  ).innerText = `当前批次 / Batch Num: ${generatorBatchNum} | 当前展示 / Display: ${generatedResults.length} / ${totalAvailable}`;
+  document.querySelector("#generator_prompt").innerText =
+    `当前批次 / Batch Num: ${generatorBatchNum} | 当前展示 / Display: ${generatedResults.length} / ${totalAvailable}`;
 }
 
 function shuffle(array) {
@@ -1538,11 +1542,11 @@ function createModalElements() {
   if (lastBackupDictTime) {
     if (lang.includes("zh")) {
       lastBackupDict = `<div style="font-size: 0.75rem; opacity: 0.4">最后备份：${new Date(
-        parseInt(lastBackupDictTime)
+        parseInt(lastBackupDictTime),
       ).toLocaleDateString("zh-CN")}</div>`;
     } else {
       lastBackupDict = `<div style="font-size: 0.75rem; opacity: 0.4">Last Backup: ${new Date(
-        parseInt(lastBackupDictTime)
+        parseInt(lastBackupDictTime),
       ).toLocaleDateString("en-US")}</div>`;
     }
   }
@@ -1773,7 +1777,7 @@ function createModalElements() {
   // backdrop pin
   labelModal.setAttribute(
     "data-bs-backdrop",
-    backdropConfig ? "static" : "true"
+    backdropConfig ? "static" : "true",
   );
   const labelPinButton = labelModal.querySelector("#label_pin");
   labelPinButton.addEventListener("click", () => {
@@ -1884,7 +1888,7 @@ function createModalElements() {
   // backdrop pin
   searchModal.setAttribute(
     "data-bs-backdrop",
-    backdropConfig ? "static" : "true"
+    backdropConfig ? "static" : "true",
   );
   const searchPinButton = searchModal.querySelector("#search_pin");
   searchPinButton.addEventListener("click", () => {
@@ -1982,7 +1986,7 @@ function createModalElements() {
   `;
   generatorModal.setAttribute(
     "data-bs-backdrop",
-    backdropConfig ? "static" : "true"
+    backdropConfig ? "static" : "true",
   );
   const generatorPin = generatorModal.querySelector("#generator_pin");
   generatorPin.addEventListener("click", () => {
@@ -2018,17 +2022,17 @@ function createModalElements() {
     window.runFlag = true;
     const tag = document.querySelector("#generator_select_tag").value;
     const restriction = document.querySelector(
-      "#generator_form_restriction"
+      "#generator_form_restriction",
     ).value;
     const availableBookmarks = generatorBookmarks.filter(
       (w) =>
         restriction === "all" ||
         (restriction === "sfw" && !w["xRestrict"]) ||
-        (restriction === "nsfw" && w["xRestrict"])
+        (restriction === "nsfw" && w["xRestrict"]),
     );
     const batchSize = Math.max(
       0,
-      parseInt(document.querySelector("#generator_form_num").value) || 100
+      parseInt(document.querySelector("#generator_form_num").value) || 100,
     );
     const batchNum = Math.ceil(availableBookmarks.length / batchSize);
     const prompt = document.querySelector("#generator_save_tag_prompt");
@@ -2224,12 +2228,12 @@ function createModalElements() {
   const featurePrompt = featureModal.querySelector("#feature_prompt");
   const featureProgress = featureModal.querySelector("#feature_modal_progress");
   const featureProgressBar = featureModal.querySelector(
-    "#feature_modal_progress_bar"
+    "#feature_modal_progress_bar",
   );
 
   // tag related
   const featurePublicationType = featureModal.querySelector(
-    "#feature_form_publication"
+    "#feature_form_publication",
   );
   const featureTag = featureModal.querySelector("#feature_select_tag");
   const featureTagButtons = featureModal
@@ -2250,7 +2254,7 @@ function createModalElements() {
     const totalWorks = await fetchAllBookmarksByTag(
       tag_,
       publicationType_,
-      progressBar_
+      progressBar_,
     );
     if (DEBUG) console.log(totalWorks);
     if (tag_ === "" && totalWorks)
@@ -2262,7 +2266,7 @@ function createModalElements() {
     featureFetchWorks().then(async (works) => {
       if (!works?.length) {
         return alert(
-          `没有获取到收藏夹内容，操作中断，请检查选项下是否有作品\nFetching bookmark information failed. Abort operation. Please check the existence of works with the configuration`
+          `没有获取到收藏夹内容，操作中断，请检查选项下是否有作品\nFetching bookmark information failed. Abort operation. Please check the existence of works with the configuration`,
         );
       }
       const tag = featureTag.value;
@@ -2286,13 +2290,13 @@ All works of tag ${tag || "All Works"} and type ${
       await updateBookmarkRestrict(
         works.map((w) => w["bookmarkData"]["id"]),
         restrict,
-        progressBar
+        progressBar,
       );
       setTimeout(() => {
         instance.hide();
         if (window.runFlag && !hold) window.location.reload();
       }, 1000);
-    })
+    }),
   );
   // delete tag
   featureTagButtons[1].addEventListener("click", async () => {
@@ -2302,13 +2306,13 @@ All works of tag ${tag || "All Works"} and type ${
   });
   // clear tag
   featureTagButtons[2].addEventListener("click", () =>
-    featureFetchWorks().then(clearBookmarkTags)
+    featureFetchWorks().then(clearBookmarkTags),
   );
   // rename tag
   featureTagButtons[3].addEventListener("click", async () => {
     const tag = featureTag.value;
     let newName = featureModal.querySelector(
-      "input#feature_new_tag_name"
+      "input#feature_new_tag_name",
     ).value;
     newName = newName.split(" ")[0].replace("（", "(").replace("）", ")");
 
@@ -2320,7 +2324,7 @@ All works of tag ${tag || "All Works"} and type ${
     if (userTagDict[type].find((e) => e.tag === newName))
       if (
         !window.confirm(
-          `将会合并标签【${tag}】至【${newName}】，是否继续？\nWill merge tag ${tag} into ${newName}. Is this Okay?`
+          `将会合并标签【${tag}】至【${newName}】，是否继续？\nWill merge tag ${tag} into ${newName}. Is this Okay?`,
         )
       )
         return;
@@ -2330,7 +2334,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
     )
       return;
     const updateDict = featureModal.querySelector(
-      "#feature_tag_update_dict"
+      "#feature_tag_update_dict",
     ).checked;
     if (updateDict && synonymDict[tag]) {
       const value = synonymDict[tag];
@@ -2349,7 +2353,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
     featureProgress.classList.remove("d-none");
     const id = setInterval(() => {
       fetch(
-        `https://www.pixiv.net/ajax/illusts/bookmarks/rename_tag_progress?lang=${lang}`
+        `https://www.pixiv.net/ajax/illusts/bookmarks/rename_tag_progress?lang=${lang}`,
       )
         .then((resRaw) => resRaw.json())
         .then((res) => {
@@ -2388,7 +2392,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
     .querySelector("button");
   batchRemoveButton.addEventListener("click", async () => {
     const display = featureModal.querySelector(
-      "#feature_batch_remove_invalid_display"
+      "#feature_batch_remove_invalid_display",
     );
     featureProgress.classList.remove("d-none");
     const invalidShow = (
@@ -2438,7 +2442,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           evt.preventDefault();
           if (
             !window.confirm(
-              `是否确认批量为失效作品添加"INVALID"标签\nInvalid works (deleted/private) will be labelled as INVALID. Is this okay?`
+              `是否确认批量为失效作品添加"INVALID"标签\nInvalid works (deleted/private) will be labelled as INVALID. Is this okay?`,
             )
           )
             return;
@@ -2454,7 +2458,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
             bookmarkIds,
             ["INVALID"],
             null,
-            featureProgressBar
+            featureProgressBar,
           );
           featurePrompt.innerText =
             "标记完成，即将刷新页面 / Updated. The page is going to reload.";
@@ -2469,13 +2473,13 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           evt.preventDefault();
           if (
             !window.confirm(
-              `是否确认批量删除失效作品\nInvalid works (deleted/private) will be removed. Is this okay?`
+              `是否确认批量删除失效作品\nInvalid works (deleted/private) will be removed. Is this okay?`,
             )
           )
             return;
           window.runFlag = true;
           const bookmarkIds = [...invalidShow, ...invalidHide].map(
-            (w) => w["bookmarkData"]["id"]
+            (w) => w["bookmarkData"]["id"],
           );
           featureProgress.classList.remove("d-none");
           featurePrompt.classList.remove("d-none");
@@ -2513,11 +2517,11 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
       const bookmarks = { show, hide };
       const a = document.createElement("a");
       a.href = URL.createObjectURL(
-        new Blob([JSON.stringify(bookmarks)], { type: "application/json" })
+        new Blob([JSON.stringify(bookmarks)], { type: "application/json" }),
       );
       a.setAttribute(
         "download",
-        `label_pixiv_bookmarks_backup_${new Date().toLocaleDateString()}.json`
+        `label_pixiv_bookmarks_backup_${new Date().toLocaleDateString()}.json`,
       );
       a.click();
       featurePrompt.innerText = "备份成功 / Backup successfully";
@@ -2529,7 +2533,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
   });
   // lookup invalid
   const featureBookmarkDisplay = featureModal.querySelector(
-    "#feature_bookmark_display"
+    "#feature_bookmark_display",
   );
   featureBookmarkButtons[1].addEventListener("click", async () => {
     const input = document.createElement("input");
@@ -2545,7 +2549,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           if (!window.runFlag) return;
           for (let work of col.filter((w) => w.title === "-----")) {
             const jsonWork = json[type].find(
-              (w) => w.id.toString() === work.id.toString()
+              (w) => w.id.toString() === work.id.toString(),
             );
             invalidArray.push(jsonWork || work);
             if (DEBUG) console.log(jsonWork);
@@ -2555,7 +2559,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           eval("json = " + evt.target.result.toString());
           if (!json["show"])
             return alert(
-              "请检查是否加载了正确的收藏夹备份\nPlease check if the backup file is correct"
+              "请检查是否加载了正确的收藏夹备份\nPlease check if the backup file is correct",
             );
           if (DEBUG) console.log(json);
           featureProgress.classList.remove("d-none");
@@ -2636,11 +2640,11 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           eval("json = " + evt.target.result.toString());
           if (!json["show"])
             return alert(
-              "请检查是否加载了正确的收藏夹备份\nPlease check if the backup file is correct"
+              "请检查是否加载了正确的收藏夹备份\nPlease check if the backup file is correct",
             );
           window.bookmarkImport = json;
           const selectTag = featureModal.querySelector(
-            "#feature_import_bookmark_tag"
+            "#feature_import_bookmark_tag",
           );
           while (selectTag.firstChild) {
             selectTag.removeChild(selectTag.firstChild);
@@ -2661,10 +2665,10 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           const optionUncat = document.createElement("option");
           optionUncat.value = "未分類";
           const uncatS = json["show"].filter(
-            (w) => !(w.associatedTags || []).length
+            (w) => !(w.associatedTags || []).length,
           ).length;
           const uncatH = json["hide"].filter(
-            (w) => !(w.associatedTags || []).length
+            (w) => !(w.associatedTags || []).length,
           ).length;
           optionUncat.innerText = `未分类作品 / Uncategorized Works (${uncatS}, ${uncatH})`;
           selectTag.appendChild(optionAll);
@@ -2673,10 +2677,10 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
             const option = document.createElement("option");
             option.value = t;
             const s = json["show"].filter((w) =>
-              (w.associatedTags || []).includes(t)
+              (w.associatedTags || []).includes(t),
             ).length;
             const h = json["hide"].filter((w) =>
-              (w.associatedTags || []).includes(t)
+              (w.associatedTags || []).includes(t),
             ).length;
             option.innerText = `${t} (${s}, ${h})`;
             selectTag.appendChild(option);
@@ -2698,13 +2702,13 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
       return alert("加载收藏夹备份失败！\nFail to load backup bookmarks");
     const json = window.bookmarkImport;
     const pub = featureModal.querySelector(
-      "#feature_import_bookmark_publication"
+      "#feature_import_bookmark_publication",
     ).value;
     const tag = featureModal.querySelector(
-      "#feature_import_bookmark_tag"
+      "#feature_import_bookmark_tag",
     ).value;
     const mode = featureModal.querySelector(
-      "#feature_import_bookmark_mode"
+      "#feature_import_bookmark_mode",
     ).value;
 
     const importWorks = json[pub].filter((w) => {
@@ -2737,10 +2741,10 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
         // note that when work does not have target tag but is in exist bookmarked works, skip will not take effect
         if (mode === "skip") continue;
         const diff = (ew.associatedTags || []).filter(
-          (t) => !associatedTags.includes(t)
+          (t) => !associatedTags.includes(t),
         );
         associatedTags = associatedTags.filter(
-          (t) => !(ew.associatedTags || []).includes(t)
+          (t) => !(ew.associatedTags || []).includes(t),
         );
         if (!associatedTags) continue;
         if (mode === "merge")
@@ -2749,7 +2753,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           await updateBookmarkTags(
             [ew["bookmarkData"]["id"]],
             associatedTags,
-            diff
+            diff,
           );
       } else {
         const resRaw = await addBookmark(id, restrict, associatedTags);
@@ -2789,7 +2793,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           return `${alt}\ntitle: ${title}\nid: ${id}\nuser: ${userName} - ${userId}\ntags: ${(
             tags || []
           ).join(", ")}\nuserTags: ${(associatedTags || []).join(
-            ", "
+            ", ",
           )}\nrestrict: ${xRestrict ? "R-18" : "SFW"}\nmessage: ${message}`;
         })
         .join("\n\n");
@@ -2855,15 +2859,15 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
           i < userTags.length
         ) {
           targetDiv = [...c1.firstElementChild.children].find((el) =>
-            el.textContent.includes(tag)
+            el.textContent.includes(tag),
           );
           if (!targetDiv) {
             c1.scrollTop = parseInt(
-              c1.firstElementChild.lastElementChild.style.top
+              c1.firstElementChild.lastElementChild.style.top,
             );
             if ("onscrollend" in window)
               await new Promise((r) =>
-                c1.addEventListener("scrollend", () => r(), { once: true })
+                c1.addEventListener("scrollend", () => r(), { once: true }),
               );
             else {
               let j = 0,
@@ -2915,7 +2919,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
     </div>
   `;
   const progressBar = progressModal.querySelector(
-    "#progress_modal_progress_bar"
+    "#progress_modal_progress_bar",
   );
 
   const body = document.querySelector("body");
@@ -2929,7 +2933,7 @@ Tag ${tag} will be renamed to ${newName}.\n All related works (both public and p
 
 async function fetchUserTags() {
   const tagsRaw = await fetch(
-    `/ajax/user/${uid}/illusts/bookmark/tags?lang=${lang}`
+    `/ajax/user/${uid}/illusts/bookmark/tags?lang=${lang}`,
   );
   const tagsObj = await tagsRaw.json();
   if (tagsObj.error === true)
@@ -2937,7 +2941,7 @@ async function fetchUserTags() {
       `获取tags失败
     Fail to fetch user tags` +
         "\n" +
-        decodeURI(tagsObj.message)
+        decodeURI(tagsObj.message),
     );
   userTagDict = tagsObj.body;
   const userTagsSet = new Set();
@@ -2968,7 +2972,7 @@ Error loading tag ${tag}. Please press F12 and take a screenshot of the error me
 async function fetchTokenPolyfill() {
   // get token
   const userRaw = await fetch(
-    "/bookmark_add.php?type=illust&illust_id=83540927"
+    "/bookmark_add.php?type=illust&illust_id=83540927",
   );
   if (!userRaw.ok) {
     console.log(`获取身份信息失败
@@ -2982,7 +2986,7 @@ async function fetchTokenPolyfill() {
 }
 
 async function updateWorkInfo(bookmarkTags) {
-  const el = await waitForDom("section.sc-jgyytr-0.buukZm");
+  const el = await waitForDom(WORK_SECTION);
   let workInfo = {};
   for (let i = 0; i < 100; i++) {
     workInfo = Object.values(el)[0]["memoizedProps"]["children"][2]["props"];
@@ -3036,9 +3040,9 @@ async function initializeVariables() {
 
   // switch between default and dark theme
   const themeDiv = document.querySelector(THEME_CONTAINER);
-  theme = themeDiv.getAttribute("data-theme") === "default";
+  theme = themeDiv.getAttribute("data-theme") === "light";
   new MutationObserver(() => {
-    theme = themeDiv.getAttribute("data-theme") === "default";
+    theme = themeDiv.getAttribute("data-theme") === "light";
     const prevBgColor = theme ? "bg-dark" : "bg-white";
     const bgColor = theme ? "bg-white" : "bg-dark";
     const prevTextColor = theme ? "text-lp-light" : "text-lp-dark";
@@ -3049,7 +3053,7 @@ async function initializeVariables() {
     [...document.querySelectorAll(".text-lp-dark, .text-lp-light")].forEach(
       (el) => {
         el.classList.replace(prevTextColor, textColor);
-      }
+      },
     );
     const prevClearTag = theme ? "dydUg" : "jbzOgz";
     const clearTag = theme ? "jbzOgz" : "dydUg";
@@ -3070,15 +3074,15 @@ async function initializeVariables() {
 }
 
 const maxRetries = 100;
-async function waitForDom(selector) {
+async function waitForDom(selector, container) {
   let dom;
   for (let i = 0; i < maxRetries; i++) {
-    dom = document.querySelector(selector);
+    dom = (container || document).querySelector(selector);
     if (dom) return dom;
-    await delay(500);
+    await delay(200);
   }
   throw new ReferenceError(
-    `[Label Bookmarks] Dom element ${selector} not loaded in given time`
+    `[Label Bookmarks] Dom element ${selector} not loaded in given time`,
   );
 }
 
@@ -3101,14 +3105,14 @@ async function injectElements() {
         <button class="label-button ${textColor}" data-bs-toggle="modal" data-bs-target="#label_modal" id="label_modal_button"/>
       `;
 
-  const clearTagsThemeClass = theme ? "jbzOgz" : "dydUg";
+  const clearTagsThemeClass = theme ? "OPGIe" : "bDwYXF";
   const clearTagsText = lang.includes("zh") ? "清除标签" : "Clear Tags";
   const clearTagsButton = document.createElement("div");
   clearTagsButton.id = "clear_tags_button";
-  clearTagsButton.className = "sc-1ij5ui8-0 QihHO sc-13ywrd6-7 tPCje";
+  clearTagsButton.className = "sc-15a17794-0 iTJRIU sc-231887f1-7 gzddfG";
   clearTagsButton.setAttribute("aria-disabled", "true");
   clearTagsButton.setAttribute("role", "button");
-  clearTagsButton.innerHTML = `<div aria-disabled="true" class="sc-4a5gah-0 ${clearTagsThemeClass}">
+  clearTagsButton.innerHTML = `<div aria-disabled="true" class="sc-74250f2c-0 ${clearTagsThemeClass}">
             <div class="sc-4a5gah-1 kHyYuA">
               ${clearTagsText}
             </div>
@@ -3138,7 +3142,7 @@ async function injectElements() {
     if (pageInfo["userId"] !== uid) {
       if (DEBUG)
         console.log(
-          "[Label Bookmarks] Aborted Injection due to mismatch homepage"
+          "[Label Bookmarks] Aborted Injection due to mismatch homepage",
         );
       return true;
     }
@@ -3151,7 +3155,7 @@ async function injectElements() {
       if (injectionObserver)
         injectionObserver.observe(pageBody, { childList: true });
       return console.log(
-        "[Label Bookmarks] Abort Injection due to no works detected yet"
+        "[Label Bookmarks] Abort Injection due to no works detected yet",
       );
     }
     if (DEBUG) {
@@ -3165,12 +3169,13 @@ async function injectElements() {
     setAdvancedSearch();
 
     // show user-labeled tags
-    const ul = await waitForDom("ul.sc-9y4be5-1");
+    const ul = await waitForDom(WORK_CONTAINER);
     async function updateAssociatedTagsCallback() {
       const workInfo = await updateWorkInfo(true);
       if (DEBUG) console.log("[Label Bookmarks] Page", workInfo.page, workInfo);
-      [...ul.querySelectorAll("[type='illust']")].forEach((img, i) => {
-        const pa = img.parentElement;
+      // TODO
+      [...ul.querySelectorAll("li")].forEach((li, i) => {
+        const pa = li.firstElementChild.firstElementChild;
         if (showWorkTags) {
           const tagsString = workInfo["works"][i].associatedTags
             .map((i) => "#" + i)
@@ -3203,7 +3208,7 @@ async function injectElements() {
       editButtonContainer.firstElementChild.style.marginRight = "auto";
       editButtonContainer.insertBefore(
         removeTagButton,
-        editButtonContainer.lastChild
+        editButtonContainer.lastChild,
       );
       let removeBookmarkContainerObserver;
       const editButtonObserver = new MutationObserver(
@@ -3212,20 +3217,20 @@ async function injectElements() {
           if (!MutationRecord[0].addedNodes.length) {
             // open edit mode
             const removeBookmarkContainer = document.querySelector(
-              "div.sc-13ywrd6-4.cXBjgZ"
+              REMOVE_BOOKMARK_CONTAINER,
             );
             removeBookmarkContainer.appendChild(clearTagsButton);
             removeBookmarkContainerObserver = new MutationObserver(() => {
               const value =
                 removeBookmarkContainer.children[2].getAttribute(
-                  "aria-disabled"
+                  "aria-disabled",
                 );
               clearTagsButton.setAttribute("aria-disabled", value);
               clearTagsButton.children[0].setAttribute("aria-disabled", value);
             });
             removeBookmarkContainerObserver.observe(
               removeBookmarkContainer.children[2],
-              { attributes: true }
+              { attributes: true },
             );
             if (tag && tag !== "未分類") {
               document.querySelector("#remove_tag_prompt").innerText =
@@ -3240,7 +3245,7 @@ async function injectElements() {
             clearTagsButton.setAttribute("aria-disabled", "true");
             clearTagsButton.children[0].setAttribute("aria-disabled", "true");
           }
-        }
+        },
       );
       editButtonObserver.observe(editButtonContainer, {
         childList: true,
@@ -3277,7 +3282,7 @@ async function injectElements() {
       if (DEBUG)
         console.log(
           "[Label Bookmarks] Current Tag",
-          workInfo.tag || "Uncategorized"
+          workInfo.tag || "Uncategorized",
         );
     }).observe(tagsContainer, {
       subtree: true,
@@ -3356,7 +3361,7 @@ async function injectElements() {
             .then(createModalElements)
             .then(injectElements);
       },
-      { once: true }
+      { once: true },
     );
 
     return true;
@@ -3375,7 +3380,7 @@ async function updateSuggestion(
   evt,
   suggestionEl,
   searchDict,
-  handleClickCandidateButton
+  handleClickCandidateButton,
 ) {
   clearTimeout(timeout);
   const keywordsArray = evt.target.value.split(" ");
@@ -3402,7 +3407,7 @@ async function updateSuggestion(
     let candidates = [];
     if (searchDict) {
       let dictKeys = Object.keys(synonymDict).filter((el) =>
-        stringIncludes(el, keyword)
+        stringIncludes(el, keyword),
       );
       if (dictKeys.length)
         candidates = dictKeys.map((dictKey) => ({
@@ -3413,8 +3418,8 @@ async function updateSuggestion(
         dictKeys = Object.keys(synonymDict).filter((key) =>
           arrayIncludes(
             synonymDict[key].map((i) => i.split("(")[0]),
-            keyword.split("(")[0]
-          )
+            keyword.split("(")[0],
+          ),
         );
         if (dictKeys.length)
           candidates = dictKeys.map((dictKey) => ({
@@ -3425,7 +3430,7 @@ async function updateSuggestion(
     }
     if (!candidates.length) {
       const resRaw = await fetch(
-        `/rpc/cps.php?keyword=${encodeURI(keyword)}&lang=${lang}`
+        `/rpc/cps.php?keyword=${encodeURI(keyword)}&lang=${lang}`,
       );
       const res = await resRaw.json();
       candidates = res["candidates"].filter((i) => i["tag_name"] !== keyword);
@@ -3483,7 +3488,7 @@ function setElementProperties() {
        }
        .label-button:hover {
          border-top: 4px solid rgb(0, 150, 250);
-       }`
+       }`,
   );
 
   // append user tags options
@@ -3591,7 +3596,7 @@ function setSynonymEventListener() {
       (candidate, candidateButton) =>
         candidateButton.addEventListener("click", () => {
           alias.value = alias.value + " " + candidate["tag_name"];
-        })
+        }),
     ).catch(console.log);
   });
   targetTag.addEventListener("keyup", (evt) => {
@@ -3651,11 +3656,11 @@ function setSynonymEventListener() {
     a.href = URL.createObjectURL(
       new Blob([JSON.stringify(synonymDict)], {
         type: "application/json",
-      })
+      }),
     );
     a.setAttribute(
       "download",
-      `label_pixiv_bookmarks_synonym_dict_${new Date().toLocaleDateString()}.json`
+      `label_pixiv_bookmarks_synonym_dict_${new Date().toLocaleDateString()}.json`,
     );
     a.click();
     setValue("lastBackupDict", Date.now());
@@ -3687,7 +3692,7 @@ function setSynonymEventListener() {
       if (
         synonymDict[targetValue] &&
         window.confirm(
-          `将会删除 ${targetValue}，请确认\nWill remove ${targetValue}. Is this okay?`
+          `将会删除 ${targetValue}，请确认\nWill remove ${targetValue}. Is this okay?`,
         )
       ) {
         delete synonymDict[targetValue];
@@ -3723,7 +3728,7 @@ function setSynonymEventListener() {
         const filteredKeys = Object.keys(synonymDict).filter(
           (key) =>
             stringIncludes(key, filter) ||
-            arrayIncludes(synonymDict[key], filter, null, null, true)
+            arrayIncludes(synonymDict[key], filter, null, null, true),
         );
         const newDict = {};
         for (let key of filteredKeys) {
@@ -3755,7 +3760,7 @@ function setSynonymEventListener() {
       a.href = URL.createObjectURL(
         new Blob([s], {
           type: "application/json",
-        })
+        }),
       );
       a.setAttribute("download", "synonym_dict_sample.json");
       a.click();
@@ -3797,7 +3802,7 @@ function setAdvancedSearch() {
               newKeyword = "!" + newKeyword;
             keywordsArray.splice(keywordsArray.length - 1, 1, newKeyword);
             searchInput.value = keywordsArray.join(" ");
-          })
+          }),
       ).catch(console.log);
     });
     const toggleBasic = document.createElement("button");
@@ -3826,7 +3831,7 @@ function setAdvancedSearch() {
     if (!index) {
       inputContainer.firstElementChild.setAttribute(
         "placeholder",
-        generatePlaceholder()
+        generatePlaceholder(),
       );
       const toggleAdvanced = document.createElement("button");
       toggleAdvanced.style.border = "1px solid #ced4da";
@@ -3929,7 +3934,7 @@ function registerMenu() {
       () => {
         setValue("showFeature", "false");
         window.location.reload();
-      }
+      },
     );
   else
     GM_registerMenuCommand_(
@@ -3937,7 +3942,7 @@ function registerMenu() {
       () => {
         setValue("showFeature", "true");
         window.location.reload();
-      }
+      },
     );
   DEBUG = getValue("DEBUG", "false") === "true";
   if (DEBUG)
